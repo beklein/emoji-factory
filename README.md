@@ -1,6 +1,6 @@
 # Emoji Factory
 
-A simple web app that shows illustrates how fast producs are made.
+A simple web app that shows illustrates how fast products are made.
 
 ## Run
 
