@@ -314,9 +314,7 @@ export default function Page() {
   const [intervalInput, setIntervalInput] = React.useState(String(config.interval))
   const [emojiInput, setEmojiInput] = React.useState(config.emoji || "😀")
   const [emojiTooltipOpen, setEmojiTooltipOpen] = React.useState(false)
-
-  const [statusMessage, setStatusMessage] = React.useState("")
-  const [manualShareUrl, setManualShareUrl] = React.useState<string | null>(null)
+  const [shareTooltipOpen, setShareTooltipOpen] = React.useState(false)
 
   const [progress, setProgress] = React.useState(0)
 
@@ -332,6 +330,7 @@ export default function Page() {
   const capacityRef = React.useRef(rows * cols)
   const emojiRef = React.useRef(config.emoji || "😀")
   const emojiTooltipTimeoutRef = React.useRef<number | null>(null)
+  const shareTooltipTimeoutRef = React.useRef<number | null>(null)
 
   const rawRate = React.useMemo(() => calculateRate(config), [config])
   const isRateOverLimit = rawRate > MAX_PRODUCTS_PER_SECOND
@@ -365,15 +364,6 @@ export default function Page() {
     () => PRESETS.find((preset) => preset.id === activePresetId),
     [activePresetId]
   )
-
-  const shareUrl = React.useMemo(() => {
-    if (typeof window === "undefined") {
-      return ""
-    }
-
-    const params = toQueryParams(config)
-    return `${window.location.origin}${window.location.pathname}?${params.toString()}`
-  }, [config])
 
   const updateConfig = React.useCallback((patch: Partial<Config>) => {
     setConfig((previous) => ({ ...previous, ...patch }))
@@ -473,17 +463,11 @@ export default function Page() {
       if (emojiTooltipTimeoutRef.current !== null) {
         window.clearTimeout(emojiTooltipTimeoutRef.current)
       }
+      if (shareTooltipTimeoutRef.current !== null) {
+        window.clearTimeout(shareTooltipTimeoutRef.current)
+      }
     }
   }, [])
-
-  React.useEffect(() => {
-    if (!statusMessage) {
-      return
-    }
-
-    const timeoutId = window.setTimeout(() => setStatusMessage(""), 2200)
-    return () => window.clearTimeout(timeoutId)
-  }, [statusMessage])
 
   React.useEffect(() => {
     const element = conveyorRef.current
@@ -602,31 +586,19 @@ export default function Page() {
     window.history.replaceState({}, "", nextUrl)
 
     const url = `${window.location.origin}${nextUrl}`
-    setManualShareUrl(null)
-
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: "Emoji Factory",
-          text: "Emoji production setup",
-          url,
-        })
-        setStatusMessage("Shared")
-        return
-      } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") {
-          setStatusMessage("Share cancelled")
-          return
-        }
-      }
-    }
 
     try {
       await navigator.clipboard.writeText(url)
-      setStatusMessage("Link copied")
+      setShareTooltipOpen(true)
+      if (shareTooltipTimeoutRef.current !== null) {
+        window.clearTimeout(shareTooltipTimeoutRef.current)
+      }
+      shareTooltipTimeoutRef.current = window.setTimeout(() => {
+        setShareTooltipOpen(false)
+        shareTooltipTimeoutRef.current = null
+      }, 1800)
     } catch {
-      setManualShareUrl(url)
-      setStatusMessage("Manual copy")
+      setShareTooltipOpen(false)
     }
   }
 
@@ -641,14 +613,21 @@ export default function Page() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h1 className="text-base font-semibold sm:text-lg">Emoji Factory</h1>
             <div className="flex items-center gap-2">
-              <Button
-                size="icon-sm"
-                variant="outline"
-                onClick={handleShare}
-                aria-label="Share setup link"
-              >
-                <Share2 />
-              </Button>
+              <Tooltip open={shareTooltipOpen}>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="icon-sm"
+                    variant="outline"
+                    onClick={handleShare}
+                    aria-label="Copy setup link"
+                  >
+                    <Share2 />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={6}>
+                  Link copied
+                </TooltipContent>
+              </Tooltip>
               <Dialog>
                 <DialogTrigger asChild>
                   <Button size="icon-sm" variant="outline" aria-label="Open help">
@@ -914,27 +893,12 @@ export default function Page() {
             </div>
           </div>
 
-          {statusMessage ? (
-            <p className="mt-3 text-xs text-foreground">{statusMessage}</p>
-          ) : null}
-
           {isRateOverLimit ? (
             <p className="mt-3 rounded-none border border-foreground/30 bg-muted px-3 py-2 text-xs text-foreground sm:text-sm">
               Warning: configured rate (
               {rawRate.toLocaleString(undefined, { maximumFractionDigits: 2 })}/s)
               exceeds max rate of {MAX_PRODUCTS_PER_SECOND}/s.
             </p>
-          ) : null}
-
-          {manualShareUrl ? (
-            <div className="mt-2 rounded-none border bg-muted p-2">
-              <p className="mb-1 text-xs text-foreground">Copy this link:</p>
-              <input
-                className="h-8 w-full rounded-none border bg-background px-2 text-xs"
-                value={manualShareUrl || shareUrl}
-                readOnly
-              />
-            </div>
           ) : null}
         </section>
 
