@@ -663,7 +663,14 @@ export default function Page() {
     }, 1800)
   }, [])
 
+  const resetProgressCue = React.useCallback(() => {
+    progressAccumulatorRef.current = 0
+    progressLastFrameRef.current = performance.now()
+    setProgress(0)
+  }, [])
+
   const applyPreset = React.useCallback((preset: Preset) => {
+    resetProgressCue()
     setActivePresetId(preset.id)
     setConfig({
       company: preset.company,
@@ -672,7 +679,7 @@ export default function Page() {
       interval: preset.interval,
       unit: preset.unit,
     })
-  }, [])
+  }, [resetProgressCue])
 
   React.useEffect(() => {
     if (typeof window === "undefined") {
