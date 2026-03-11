@@ -20,8 +20,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { cn } from "@/lib/utils"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
 type Unit = "second" | "min" | "hour" | "day" | "week" | "month" | "year"
 
@@ -92,7 +95,8 @@ const PRESETS: Preset[] = [
     count: 251_700_000,
     interval: 1,
     unit: "year",
-    sourceUrl: "https://www.idc.com/promo/smartphone-market-share/market-share/",
+    sourceUrl:
+      "https://www.idc.com/promo/smartphone-market-share/market-share/",
   },
   {
     id: "sony",
@@ -101,7 +105,8 @@ const PRESETS: Preset[] = [
     count: 18_500_000,
     interval: 1,
     unit: "year",
-    sourceUrl: "https://www.sony.com/en/SonyInfo/IR/library/presen/er/pdf/24q3_supplement.pdf",
+    sourceUrl:
+      "https://www.sony.com/en/SonyInfo/IR/library/presen/er/pdf/24q3_supplement.pdf",
   },
   {
     id: "toyota",
@@ -120,7 +125,8 @@ const PRESETS: Preset[] = [
     count: 1_660_000,
     interval: 1,
     unit: "year",
-    sourceUrl: "https://www.sec.gov/Archives/edgar/data/1318605/000162828026003952/tsla-20251231.htm",
+    sourceUrl:
+      "https://www.sec.gov/Archives/edgar/data/1318605/000162828026003952/tsla-20251231.htm",
   },
   {
     id: "canon",
@@ -138,7 +144,8 @@ const PRESETS: Preset[] = [
     count: 311_000_000,
     interval: 1,
     unit: "year",
-    sourceUrl: "https://report.adidas-group.com/2023/en/group-management-report-our-company/global-operations.html",
+    sourceUrl:
+      "https://report.adidas-group.com/2023/en/group-management-report-our-company/global-operations.html",
   },
   {
     id: "yamaha",
@@ -147,7 +154,8 @@ const PRESETS: Preset[] = [
     count: 4_961_000,
     interval: 1,
     unit: "year",
-    sourceUrl: "https://global.yamaha-motor.com/ir/library/factbook/pdf/2025/2025factbook.pdf",
+    sourceUrl:
+      "https://global.yamaha-motor.com/ir/library/factbook/pdf/2025/2025factbook.pdf",
   },
   {
     id: "rolex",
@@ -156,7 +164,8 @@ const PRESETS: Preset[] = [
     count: 1_150_000,
     interval: 1,
     unit: "year",
-    sourceUrl: "https://revolutionwatch.com/what-we-can-learn-from-morgan-stanleys-ninth-annual-swiss-watch-report/",
+    sourceUrl:
+      "https://revolutionwatch.com/what-we-can-learn-from-morgan-stanleys-ninth-annual-swiss-watch-report/",
   },
 ]
 
@@ -174,6 +183,7 @@ const EMOJI_SCALE = 0.72
 const MIN_EMOJI_SIZE = 22
 const MAX_EMOJI_SIZE = 44
 const MAX_PRODUCTS_PER_SECOND = 10
+const MAX_FACTORIES = 9
 const ITEM_ENTRY_ANIMATION =
   "conveyor-enter-from-left 220ms cubic-bezier(0.16, 1, 0.3, 1) both"
 const KEYCAP_REGEX = /^[0-9#*]\uFE0F?\u20E3$/u
@@ -245,7 +255,10 @@ function parseConfigFromQuery(searchParams: URLSearchParams, fallback: Config) {
 
   const company = searchParams.get("company")
   const emoji = normalizeEmoji(searchParams.get("emoji"))
-  const count = Math.max(0, parseNumeric(searchParams.get("count"), fallback.count))
+  const count = Math.max(
+    0,
+    parseNumeric(searchParams.get("count"), fallback.count)
+  )
   const interval = parseNumeric(searchParams.get("interval"), fallback.interval)
   const unit = normalizeUnit(searchParams.get("unit"))
 
@@ -293,11 +306,281 @@ function getSerpentinePosition(index: number, cols: number) {
   return { row, col: adjustedCol }
 }
 
-function buildFullGridItems(capacity: number, emoji: string): ConveyorItem[] {
-  return Array.from({ length: capacity }, (_, index) => ({
-    id: -(index + 1),
-    emoji,
-  }))
+type FactoryConveyorProps = {
+  emoji: string
+  factoryIndex: number
+  mode: "compact" | "full"
+  paused: boolean
+  rate: number
+}
+
+function FactoryConveyor({
+  emoji,
+  factoryIndex,
+  mode,
+  paused,
+  rate,
+}: FactoryConveyorProps) {
+  const isFullSize = mode === "full"
+  const [rows, setRows] = React.useState(5)
+  const [cols, setCols] = React.useState(8)
+  const [conveyorSize, setConveyorSize] = React.useState({
+    width: 0,
+    height: 0,
+  })
+  const [items, setItems] = React.useState<ConveyorItem[]>([])
+
+  const conveyorRef = React.useRef<HTMLDivElement | null>(null)
+  const accumulatorRef = React.useRef(0)
+  const lastFrameRef = React.useRef(0)
+  const itemIdRef = React.useRef(0)
+
+  const rateRef = React.useRef(rate)
+  const pausedRef = React.useRef(paused)
+  const capacityRef = React.useRef(rows * cols)
+  const emojiRef = React.useRef(emoji || "😀")
+
+  const capacity = rows * cols
+  const innerWidth = Math.max(0, conveyorSize.width - CELL_PADDING * 2)
+  const innerHeight = Math.max(0, conveyorSize.height - CELL_PADDING * 2)
+  const cellWidth = Math.max(
+    0,
+    (innerWidth - CELL_GAP * Math.max(0, cols - 1)) / cols
+  )
+  const cellHeight = Math.max(
+    0,
+    (innerHeight - CELL_GAP * Math.max(0, rows - 1)) / rows
+  )
+  const shortestCellEdge = Math.min(cellWidth, cellHeight)
+  const emojiFontSize =
+    shortestCellEdge > 0
+      ? Math.max(
+          MIN_EMOJI_SIZE,
+          Math.min(MAX_EMOJI_SIZE, shortestCellEdge * EMOJI_SCALE)
+        )
+      : MIN_EMOJI_SIZE
+  const itemTransitionMs = rate >= 8 ? 90 : rate >= 4 ? 120 : 180
+  const conveyorHeightClass = isFullSize
+    ? "h-[54vh] min-h-[260px] max-h-[520px]"
+    : "h-36 min-h-[144px]"
+
+  React.useEffect(() => {
+    rateRef.current = rate
+    if (rate <= 0) {
+      accumulatorRef.current = 0
+      setItems([])
+    }
+  }, [rate])
+
+  React.useEffect(() => {
+    pausedRef.current = paused
+  }, [paused])
+
+  React.useEffect(() => {
+    capacityRef.current = capacity
+    setItems((previous) => {
+      if (previous.length <= capacity) {
+        return previous
+      }
+      return previous.slice(0, capacity)
+    })
+  }, [capacity])
+
+  React.useEffect(() => {
+    emojiRef.current = emoji || "😀"
+    accumulatorRef.current = 0
+    setItems([])
+  }, [emoji])
+
+  React.useEffect(() => {
+    const element = conveyorRef.current
+    if (!element) {
+      return
+    }
+
+    const updateConveyorGrid = (width: number, height: number) => {
+      if (width <= 0 || height <= 0) {
+        return
+      }
+
+      let nextCols = 0
+      let nextRows = 0
+
+      if (isFullSize) {
+        const isMobile = width < 640
+        const columnCellSize = isMobile ? 42 : 50
+        const rowCellSize = isMobile ? 34 : 50
+        nextCols = Math.max(4, Math.floor(width / columnCellSize))
+        nextRows = Math.max(isMobile ? 5 : 3, Math.floor(height / rowCellSize))
+      } else {
+        const isNarrow = width < 280
+        const columnCellSize = isNarrow ? 34 : 40
+        const rowCellSize = isNarrow ? 30 : 36
+        nextCols = Math.max(
+          isNarrow ? 5 : 6,
+          Math.floor(width / columnCellSize)
+        )
+        nextRows = Math.max(4, Math.floor(height / rowCellSize))
+      }
+
+      setConveyorSize((previous) =>
+        previous.width === width && previous.height === height
+          ? previous
+          : { width, height }
+      )
+      setCols((previous) => (previous === nextCols ? previous : nextCols))
+      setRows((previous) => (previous === nextRows ? previous : nextRows))
+    }
+
+    const measure = () => {
+      const rect = element.getBoundingClientRect()
+      updateConveyorGrid(rect.width, rect.height)
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (!entry) {
+        return
+      }
+
+      updateConveyorGrid(entry.contentRect.width, entry.contentRect.height)
+    })
+
+    measure()
+    observer.observe(element)
+    window.addEventListener("resize", measure)
+
+    return () => {
+      observer.disconnect()
+      window.removeEventListener("resize", measure)
+    }
+  }, [isFullSize])
+
+  React.useEffect(() => {
+    let frame = 0
+    lastFrameRef.current = performance.now()
+
+    const run = (timestamp: number) => {
+      const elapsedSeconds = Math.max(
+        0,
+        Math.min(1, (timestamp - lastFrameRef.current) / 1000)
+      )
+      lastFrameRef.current = timestamp
+
+      const currentRate = rateRef.current
+      if (!pausedRef.current && currentRate > 0) {
+        accumulatorRef.current += elapsedSeconds * currentRate
+        const maxPerFrame = Math.max(1, Math.ceil(currentRate / 10))
+        const spawnCount = Math.min(
+          maxPerFrame,
+          Math.floor(accumulatorRef.current),
+          capacityRef.current
+        )
+
+        if (spawnCount > 0) {
+          accumulatorRef.current -= spawnCount
+          setItems((previous) => {
+            const spawned: ConveyorItem[] = []
+            for (let index = 0; index < spawnCount; index += 1) {
+              itemIdRef.current += 1
+              spawned.push({
+                id: itemIdRef.current,
+                emoji: emojiRef.current || "😀",
+              })
+            }
+
+            const next = [...spawned, ...previous]
+            const maxItems = capacityRef.current
+            if (next.length > maxItems) {
+              return next.slice(0, maxItems)
+            }
+
+            return next
+          })
+        }
+      }
+
+      frame = requestAnimationFrame(run)
+    }
+
+    frame = requestAnimationFrame(run)
+    return () => cancelAnimationFrame(frame)
+  }, [])
+
+  return (
+    <div className="rounded-md border bg-background p-2">
+      <div className="mb-2 flex items-center justify-between text-[11px] text-muted-foreground sm:text-xs">
+        <span>Factory {factoryIndex + 1}</span>
+        <span>
+          {rate.toLocaleString(undefined, { maximumFractionDigits: 2 })}/s
+        </span>
+      </div>
+      <div
+        ref={conveyorRef}
+        className={`relative overflow-hidden rounded-sm bg-card ${conveyorHeightClass}`}
+      >
+        <div
+          className="pointer-events-none absolute inset-0 grid"
+          style={{
+            gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+            gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
+            gap: `${CELL_GAP}px`,
+            padding: `${CELL_PADDING}px`,
+          }}
+        >
+          {Array.from({ length: capacity }).map((_, index) => {
+            const position = getSerpentinePosition(index, cols)
+            return (
+              <span
+                key={`factory-${factoryIndex}-cell-${index}`}
+                className="rounded-none border border-border bg-muted"
+                style={{
+                  gridColumnStart: position.col + 1,
+                  gridRowStart: position.row + 1,
+                }}
+              />
+            )
+          })}
+        </div>
+
+        <div className="pointer-events-none absolute inset-0">
+          {items.map((item, index) => {
+            const position = getSerpentinePosition(index, cols)
+            const x = CELL_PADDING + position.col * (cellWidth + CELL_GAP)
+            const y = CELL_PADDING + position.row * (cellHeight + CELL_GAP)
+
+            return (
+              <span
+                key={item.id}
+                className="absolute will-change-transform"
+                style={{
+                  left: 0,
+                  top: 0,
+                  width: `${cellWidth}px`,
+                  height: `${cellHeight}px`,
+                  transform: `translate(${x}px, ${y}px)`,
+                  transitionProperty: "transform",
+                  transitionDuration: `${itemTransitionMs}ms`,
+                  transitionTimingFunction: "linear",
+                }}
+              >
+                <span
+                  className="flex h-full w-full items-center justify-center rounded-none border border-border bg-card leading-none will-change-transform"
+                  style={{
+                    fontSize: `${emojiFontSize}px`,
+                    lineHeight: 1,
+                    animation: ITEM_ENTRY_ANIMATION,
+                  }}
+                >
+                  {item.emoji || "😀"}
+                </span>
+              </span>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export default function Page() {
@@ -306,59 +589,59 @@ export default function Page() {
   const [isReady, setIsReady] = React.useState(false)
 
   const [paused, setPaused] = React.useState(false)
-  const [rows, setRows] = React.useState(5)
-  const [cols, setCols] = React.useState(9)
-  const [conveyorSize, setConveyorSize] = React.useState({ width: 0, height: 0 })
-  const [items, setItems] = React.useState<ConveyorItem[]>([])
   const [countInput, setCountInput] = React.useState(String(config.count))
-  const [intervalInput, setIntervalInput] = React.useState(String(config.interval))
+  const [intervalInput, setIntervalInput] = React.useState(
+    String(config.interval)
+  )
   const [emojiInput, setEmojiInput] = React.useState(config.emoji || "😀")
   const [emojiTooltipOpen, setEmojiTooltipOpen] = React.useState(false)
   const [shareTooltipOpen, setShareTooltipOpen] = React.useState(false)
-
   const [progress, setProgress] = React.useState(0)
+  const [isMobileViewport, setIsMobileViewport] = React.useState(false)
 
-  const conveyorRef = React.useRef<HTMLDivElement | null>(null)
-
-  const accumulatorRef = React.useRef(0)
-  const lastFrameRef = React.useRef(0)
-  const itemIdRef = React.useRef(0)
-
-  const rateRef = React.useRef(0)
-  const overLimitRef = React.useRef(false)
-  const pausedRef = React.useRef(false)
-  const capacityRef = React.useRef(rows * cols)
-  const emojiRef = React.useRef(config.emoji || "😀")
   const emojiTooltipTimeoutRef = React.useRef<number | null>(null)
   const shareTooltipTimeoutRef = React.useRef<number | null>(null)
+  const progressAccumulatorRef = React.useRef(0)
+  const progressLastFrameRef = React.useRef(0)
+  const progressRateRef = React.useRef(0)
+  const progressPausedRef = React.useRef(paused)
 
   const rawRate = React.useMemo(() => calculateRate(config), [config])
-  const isRateOverLimit = rawRate > MAX_PRODUCTS_PER_SECOND
-  const rate = Math.min(rawRate, MAX_PRODUCTS_PER_SECOND)
-  const capacity = rows * cols
-  const displayItems = React.useMemo(
-    () =>
-      isRateOverLimit ? buildFullGridItems(capacity, config.emoji || "😀") : items,
-    [capacity, config.emoji, isRateOverLimit, items]
-  )
-  const innerWidth = Math.max(0, conveyorSize.width - CELL_PADDING * 2)
-  const innerHeight = Math.max(0, conveyorSize.height - CELL_PADDING * 2)
-  const cellWidth = Math.max(0, (innerWidth - CELL_GAP * Math.max(0, cols - 1)) / cols)
-  const cellHeight = Math.max(0, (innerHeight - CELL_GAP * Math.max(0, rows - 1)) / rows)
-  const shortestCellEdge = Math.min(cellWidth, cellHeight)
-  const emojiFontSize =
-    shortestCellEdge > 0
-      ? Math.max(
-        MIN_EMOJI_SIZE,
-        Math.min(MAX_EMOJI_SIZE, shortestCellEdge * EMOJI_SCALE)
-      )
-      : MIN_EMOJI_SIZE
-  const itemTransitionMs = rate >= 14 ? 80 : rate >= 6 ? 110 : 180
+  const requiredFactories =
+    rawRate > 0 ? Math.ceil(rawRate / MAX_PRODUCTS_PER_SECOND) : 1
+  const factoryCount = Math.max(1, Math.min(MAX_FACTORIES, requiredFactories))
+  const maxSupportedRate = MAX_PRODUCTS_PER_SECOND * MAX_FACTORIES
+  const effectiveRate = Math.min(rawRate, maxSupportedRate)
+  const isFactoryLimitReached = requiredFactories > MAX_FACTORIES
+  const isSingleFactory = factoryCount === 1
+  const factoryGridColumns = Math.max(1, Math.ceil(Math.sqrt(factoryCount)))
+  const cueRate = effectiveRate <= MAX_PRODUCTS_PER_SECOND ? effectiveRate : 0
+  const showProgressCue = !paused && cueRate > 0
+  const factoryRates = React.useMemo(() => {
+    const rates = Array.from({ length: factoryCount }, () => 0)
+    let remainingRate = effectiveRate
+
+    for (let index = 0; index < factoryCount; index += 1) {
+      const nextRate = Math.min(MAX_PRODUCTS_PER_SECOND, remainingRate)
+      rates[index] = nextRate
+      remainingRate = Math.max(0, remainingRate - nextRate)
+    }
+
+    return rates
+  }, [effectiveRate, factoryCount])
   const inputsDisabled = activePresetId !== CUSTOM_ID
-  const showProgressCue = !paused && !isRateOverLimit
-  const companyInputWidthCh = Math.max(10, Math.min(32, config.company.trim().length + 2))
-  const countInputWidthCh = Math.max(14, Math.min(28, Math.max(1, countInput.length) + 8))
-  const intervalInputWidthCh = Math.max(8, Math.min(16, Math.max(1, intervalInput.length) + 5))
+  const companyInputWidthCh = Math.max(
+    10,
+    Math.min(32, config.company.trim().length + 2)
+  )
+  const countInputWidthCh = Math.max(
+    14,
+    Math.min(28, Math.max(1, countInput.length) + 8)
+  )
+  const intervalInputWidthCh = Math.max(
+    8,
+    Math.min(16, Math.max(1, intervalInput.length) + 5)
+  )
 
   const activePreset = React.useMemo(
     () => PRESETS.find((preset) => preset.id === activePresetId),
@@ -411,43 +694,8 @@ export default function Page() {
   }, [applyPreset])
 
   React.useEffect(() => {
-    overLimitRef.current = isRateOverLimit
-    setItems([])
-    accumulatorRef.current = 0
-    setProgress(0)
-  }, [isRateOverLimit])
-
-  React.useEffect(() => {
-    rateRef.current = rate
-    if (isRateOverLimit || rate <= 0 || rate > 1) {
-      setProgress(0)
-    }
-    if (isRateOverLimit || rate <= 0) {
-      accumulatorRef.current = 0
-    }
-  }, [isRateOverLimit, rate])
-
-  React.useEffect(() => {
-    pausedRef.current = paused
-  }, [paused])
-
-  React.useEffect(() => {
-    capacityRef.current = capacity
-    setItems((previous) => {
-      if (previous.length <= capacity) {
-        return previous
-      }
-      return previous.slice(0, capacity)
-    })
-  }, [capacity])
-
-  React.useEffect(() => {
-    emojiRef.current = config.emoji || "😀"
     setEmojiInput(config.emoji || "😀")
     setEmojiTooltipOpen(false)
-    accumulatorRef.current = 0
-    setProgress(0)
-    setItems([])
   }, [config.emoji])
 
   React.useEffect(() => {
@@ -459,6 +707,61 @@ export default function Page() {
   }, [config.interval])
 
   React.useEffect(() => {
+    if (typeof window === "undefined") {
+      return
+    }
+
+    const updateViewport = () => {
+      setIsMobileViewport(window.innerWidth < 768)
+    }
+
+    updateViewport()
+    window.addEventListener("resize", updateViewport)
+    return () => window.removeEventListener("resize", updateViewport)
+  }, [])
+
+  React.useEffect(() => {
+    progressRateRef.current = cueRate
+    if (cueRate <= 0) {
+      progressAccumulatorRef.current = 0
+      setProgress(0)
+    }
+  }, [cueRate])
+
+  React.useEffect(() => {
+    progressPausedRef.current = paused
+  }, [paused])
+
+  React.useEffect(() => {
+    let frame = 0
+    progressLastFrameRef.current = performance.now()
+
+    const run = (timestamp: number) => {
+      const elapsedSeconds = Math.max(
+        0,
+        Math.min(1, (timestamp - progressLastFrameRef.current) / 1000)
+      )
+      progressLastFrameRef.current = timestamp
+
+      const currentRate = progressRateRef.current
+      if (!progressPausedRef.current && currentRate > 0) {
+        progressAccumulatorRef.current += elapsedSeconds * currentRate
+        const completed = Math.floor(progressAccumulatorRef.current)
+        if (completed > 0) {
+          progressAccumulatorRef.current -= completed
+        }
+
+        setProgress(Math.min(1, Math.max(0, progressAccumulatorRef.current)))
+      }
+
+      frame = requestAnimationFrame(run)
+    }
+
+    frame = requestAnimationFrame(run)
+    return () => cancelAnimationFrame(frame)
+  }, [])
+
+  React.useEffect(() => {
     return () => {
       if (emojiTooltipTimeoutRef.current !== null) {
         window.clearTimeout(emojiTooltipTimeoutRef.current)
@@ -467,113 +770,6 @@ export default function Page() {
         window.clearTimeout(shareTooltipTimeoutRef.current)
       }
     }
-  }, [])
-
-  React.useEffect(() => {
-    const element = conveyorRef.current
-    if (!element) {
-      return
-    }
-
-    const updateConveyorGrid = (width: number, height: number) => {
-      if (width <= 0 || height <= 0) {
-        return
-      }
-
-      const isMobile = width < 640
-      const columnCellSize = isMobile ? 42 : 50
-      const rowCellSize = isMobile ? 34 : 50
-      const nextCols = Math.max(4, Math.floor(width / columnCellSize))
-      const nextRows = Math.max(isMobile ? 5 : 3, Math.floor(height / rowCellSize))
-
-      setConveyorSize((previous) =>
-        previous.width === width && previous.height === height
-          ? previous
-          : { width, height }
-      )
-      setCols((previous) => (previous === nextCols ? previous : nextCols))
-      setRows((previous) => (previous === nextRows ? previous : nextRows))
-    }
-
-    const measure = () => {
-      const rect = element.getBoundingClientRect()
-      updateConveyorGrid(rect.width, rect.height)
-    }
-
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0]
-      if (!entry) {
-        return
-      }
-
-      updateConveyorGrid(entry.contentRect.width, entry.contentRect.height)
-    })
-
-    measure()
-    observer.observe(element)
-    window.addEventListener("resize", measure)
-
-    return () => {
-      observer.disconnect()
-      window.removeEventListener("resize", measure)
-    }
-  }, [isReady])
-
-  React.useEffect(() => {
-    let frame = 0
-    lastFrameRef.current = performance.now()
-
-    const run = (timestamp: number) => {
-      const elapsedSeconds = Math.max(
-        0,
-        Math.min(1, (timestamp - lastFrameRef.current) / 1000)
-      )
-      lastFrameRef.current = timestamp
-
-      const currentRate = rateRef.current
-      if (!pausedRef.current && !overLimitRef.current && currentRate > 0) {
-        accumulatorRef.current += elapsedSeconds * currentRate
-        const maxPerFrame = Math.max(1, Math.ceil(currentRate / 10))
-        const spawnCount = Math.min(
-          maxPerFrame,
-          Math.floor(accumulatorRef.current),
-          capacityRef.current
-        )
-
-        if (spawnCount > 0) {
-          accumulatorRef.current -= spawnCount
-          setItems((previous) => {
-            const spawned: ConveyorItem[] = []
-            for (let index = 0; index < spawnCount; index += 1) {
-              itemIdRef.current += 1
-              spawned.push({ id: itemIdRef.current, emoji: emojiRef.current || "😀" })
-            }
-
-            const next = [...spawned, ...previous]
-            const maxItems = capacityRef.current
-            if (next.length > maxItems) {
-              return next.slice(0, maxItems)
-            }
-
-            return next
-          })
-        }
-
-        if (currentRate <= 1) {
-          if (spawnCount > 0) {
-            // Ensure the progress cue visibly reaches 100% before resetting.
-            setProgress(1)
-          } else {
-            setProgress(Math.min(1, Math.max(0, accumulatorRef.current)))
-          }
-        }
-      }
-
-      frame = requestAnimationFrame(run)
-    }
-
-    frame = requestAnimationFrame(run)
-    return () => cancelAnimationFrame(frame)
   }, [])
 
   async function handleShare() {
@@ -611,7 +807,9 @@ export default function Page() {
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
         <section className="rounded-lg border bg-card p-4 sm:p-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h1 className="text-base font-semibold sm:text-lg">Emoji Factory</h1>
+            <h1 className="text-base font-semibold sm:text-lg">
+              Emoji Factory
+            </h1>
             <div className="flex items-center gap-2">
               <Tooltip open={shareTooltipOpen}>
                 <TooltipTrigger asChild>
@@ -630,7 +828,11 @@ export default function Page() {
               </Tooltip>
               <Dialog>
                 <DialogTrigger asChild>
-                  <Button size="icon-sm" variant="outline" aria-label="Open help">
+                  <Button
+                    size="icon-sm"
+                    variant="outline"
+                    aria-label="Open help"
+                  >
                     <CircleHelp />
                   </Button>
                 </DialogTrigger>
@@ -638,10 +840,10 @@ export default function Page() {
                   <DialogHeader>
                     <DialogTitle>Help</DialogTitle>
                     <DialogDescription>
-                      Pick a preset or switch and select Custom to edit values manually.
-                      The conveyor fills based on production rate.
-                      You can pause or resume production if you want.
-                      Max. production rate is 10/s.
+                      Pick a preset or switch and select Custom to edit values
+                      manually. The conveyor fills based on production rate. You
+                      can pause or resume production if you want. Each factory
+                      can produce max 10/s, and we can spin up to 64 factories.
                     </DialogDescription>
                   </DialogHeader>
                   <DialogDescription>
@@ -681,7 +883,11 @@ export default function Page() {
                 }
               }}
             >
-              <SelectTrigger id="preset" size="sm" className="w-auto bg-background">
+              <SelectTrigger
+                id="preset"
+                size="sm"
+                className="w-auto bg-background"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -710,12 +916,16 @@ export default function Page() {
             <Input
               className="w-auto"
               value={config.company}
-              onChange={(event) => updateConfig({ company: event.target.value })}
+              onChange={(event) =>
+                updateConfig({ company: event.target.value })
+              }
               disabled={inputsDisabled}
               style={{ width: `${companyInputWidthCh}ch` }}
               aria-label="Company"
             />
-            <span className="inline-flex h-8 items-center leading-none">produces</span>
+            <span className="inline-flex h-8 items-center leading-none">
+              produces
+            </span>
             <Input
               className="w-auto"
               type="number"
@@ -781,7 +991,9 @@ export default function Page() {
                       showEmojiValidationTooltip()
                     }}
                     onPaste={(event) => {
-                      const nextEmoji = normalizeEmoji(event.clipboardData.getData("text"))
+                      const nextEmoji = normalizeEmoji(
+                        event.clipboardData.getData("text")
+                      )
                       event.preventDefault()
                       if (nextEmoji) {
                         setEmojiInput(nextEmoji)
@@ -812,7 +1024,9 @@ export default function Page() {
                 Emoji only. Clear the field, then enter one emoji.
               </TooltipContent>
             </Tooltip>
-            <span className="inline-flex h-8 items-center leading-none">s every</span>
+            <span className="inline-flex h-8 items-center leading-none">
+              s every
+            </span>
             <Input
               className="w-auto"
               type="number"
@@ -880,92 +1094,57 @@ export default function Page() {
                 {paused ? "Resume Production" : "Pause Production"}
               </Button>
               <span
-                className={cn(
-                  "pointer-events-none absolute inset-x-0 bottom-0 h-0.5 overflow-hidden transition-opacity",
+                className={`pointer-events-none absolute inset-x-0 bottom-0 h-0.5 overflow-hidden transition-opacity ${
                   showProgressCue ? "opacity-100" : "opacity-0"
-                )}
+                }`}
               >
                 <span
                   className="block h-full bg-foreground"
-                  style={{ width: `${Math.min(100, Math.max(0, progress * 100))}%` }}
+                  style={{
+                    width: `${Math.min(100, Math.max(0, progress * 100))}%`,
+                  }}
                 />
               </span>
             </div>
           </div>
 
-          {isRateOverLimit ? (
+          {isFactoryLimitReached ? (
             <p className="mt-3 rounded-none border border-foreground/30 bg-muted px-3 py-2 text-xs text-foreground sm:text-sm">
-              Warning: configured rate (
-              {rawRate.toLocaleString(undefined, { maximumFractionDigits: 2 })}/s)
-              exceeds max rate of {MAX_PRODUCTS_PER_SECOND}/s.
+              Warning: Too much stuff is being produced. We hit the cap of{" "}
+              {MAX_FACTORIES} factories, so output is limited to{" "}
+              {maxSupportedRate.toLocaleString(undefined, {
+                maximumFractionDigits: 2,
+              })}
+              /s instead of{" "}
+              {rawRate.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+              /s.
             </p>
           ) : null}
         </section>
 
         <section className="rounded-lg border bg-card p-2 sm:p-3">
           <div
-            ref={conveyorRef}
-            className="relative h-[54vh] min-h-[260px] max-h-[520px] overflow-hidden rounded-md bg-background"
+            className={isSingleFactory ? "space-y-3" : "grid gap-3"}
+            style={
+              isSingleFactory
+                ? undefined
+                : {
+                    gridTemplateColumns: `repeat(${
+                      isMobileViewport ? 1 : factoryGridColumns
+                    }, minmax(0, 1fr))`,
+                  }
+            }
           >
-            <div
-              className="pointer-events-none absolute inset-0 grid"
-              style={{
-                gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
-                gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
-                gap: `${CELL_GAP}px`,
-                padding: `${CELL_PADDING}px`,
-              }}
-            >
-              {Array.from({ length: capacity }).map((_, index) => {
-                const position = getSerpentinePosition(index, cols)
-                return (
-                  <span
-                    key={`cell-${index}`}
-                    className="rounded-none border border-border bg-muted"
-                    style={{
-                      gridColumnStart: position.col + 1,
-                      gridRowStart: position.row + 1,
-                    }}
-                  />
-                )
-              })}
-            </div>
-
-            <div className="pointer-events-none absolute inset-0">
-              {displayItems.map((item, index) => {
-                const position = getSerpentinePosition(index, cols)
-                const x = CELL_PADDING + position.col * (cellWidth + CELL_GAP)
-                const y = CELL_PADDING + position.row * (cellHeight + CELL_GAP)
-
-                return (
-                  <span
-                    key={item.id}
-                    className="absolute will-change-transform"
-                    style={{
-                      left: 0,
-                      top: 0,
-                      width: `${cellWidth}px`,
-                      height: `${cellHeight}px`,
-                      transform: `translate(${x}px, ${y}px)`,
-                      transitionProperty: "transform",
-                      transitionDuration: `${itemTransitionMs}ms`,
-                      transitionTimingFunction: "linear",
-                    }}
-                  >
-                    <span
-                      className="flex h-full w-full items-center justify-center rounded-none border border-border bg-card leading-none will-change-transform"
-                      style={{
-                        fontSize: `${emojiFontSize}px`,
-                        lineHeight: 1,
-                        animation: ITEM_ENTRY_ANIMATION,
-                      }}
-                    >
-                      {item.emoji || "😀"}
-                    </span>
-                  </span>
-                )
-              })}
-            </div>
+            {factoryRates.map((factoryRate, index) => (
+              <FactoryConveyor
+                key={`factory-${index + 1}`}
+                emoji={config.emoji}
+                factoryIndex={index}
+                mode={isSingleFactory ? "full" : "compact"}
+                paused={paused}
+                rate={factoryRate}
+              />
+            ))}
           </div>
         </section>
       </div>
