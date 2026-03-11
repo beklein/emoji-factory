@@ -779,7 +779,7 @@ export default function Page() {
 
     const params = toQueryParams(config)
     const nextUrl = `${window.location.pathname}?${params.toString()}`
-    window.history.replaceState({}, "", nextUrl)
+    window.history.replaceState({}, "Emoji Factory", nextUrl)
 
     const url = `${window.location.origin}${nextUrl}`
 
